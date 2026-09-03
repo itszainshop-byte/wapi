@@ -81,7 +81,7 @@ const app = express();
 // HEALTH CHECK - MUST BE DEFINED FIRST
 // ============================================================
 app.get('/healthz', (_req, res) => {
-  res.status(200).json({ 
+  res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
@@ -950,4 +950,415 @@ async function initializeSessionClient(session, sessionId, sessionDir) {
 
         session.recoveryBlockedUntil = Date.now() + SESSION_RECOVERY_COOLDOWN_MS;
 
-        if (isSessionProfileLockError(error
+        if (isSessionProfileLockError(error)) {
+          console.warn('Recovery initialize paused for session due to profile lock, waiting for explicit start', sessionId, error?.message || error);
+          session.recoveryBlockedUntil = Date.now() + SESSION_PROFILE_LOCK_COOLDOWN_MS;
+          return null;
+        }
+
+        if (isRecoverableRuntimeError(error)) {
+          console.warn('Recovery initialize error for session', sessionId, error?.message || error);
+          scheduleSessionRecovery(session, 'recover_initialize_error');
+          return null;
+        }
+
+        throw error;
+      }
+    })().finally(() => {
+      session.recoveringPromise = null;
+    });
+
+    return session.recoveringPromise;
+  };
+
+  try {
+    await initializeClientWithTimeout(client, sessionId);
+  } catch (error) {
+    markSessionDisconnected(session, client, { preservePhone: false });
+
+    if (error?.code === 'SESSION_INITIALIZE_TIMEOUT') {
+      applyRecoveryTimeoutBackoff(session, 'initialize_timeout');
+    } else {
+      session.recoveryBlockedUntil = Date.now() + SESSION_RECOVERY_COOLDOWN_MS;
+    }
+
+    await destroyClientSafely(client, 'initialize_error');
+
+    if (isRecoverableRuntimeError(error)) {
+      console.warn('Recoverable initialize error for session', sessionId, error?.message || error);
+      if (error?.code !== 'SESSION_INITIALIZE_TIMEOUT' && !isSessionProfileLockError(error)) {
+        scheduleSessionRecovery(session, 'initialize_error');
+      }
+    } else {
+      console.error('Client initialize error for session', sessionId, error);
+    }
+
+    throw error;
+  }
+
+  return client;
+}
+
+async function getOrCreateSession(sessionId) {
+  const existing = sessions.get(sessionId);
+  if (existing) {
+    existing.lastAccessedAt = Date.now();
+    enforceStartingTimeoutFallback(existing);
+
+    if (!shouldReinitializeSession(existing)) {
+      return existing;
+    }
+
+    if (existing.recoveryBlockedUntil && existing.recoveryBlockedUntil > Date.now()) {
+      return existing;
+    }
+  }
+
+  const inFlight = sessionInitPromises.get(sessionId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const initPromise = (async () => {
+    const current = sessions.get(sessionId);
+    if (current) {
+      enforceStartingTimeoutFallback(current);
+
+      if (!shouldReinitializeSession(current)) {
+        return current;
+      }
+
+      if (current.recoveryBlockedUntil && current.recoveryBlockedUntil > Date.now()) {
+        return current;
+      }
+    }
+
+    const sessionDir = await resolveSessionDir(sessionId);
+    await fs.mkdir(sessionDir, { recursive: true });
+
+    const session = current ?? {
+      sessionId,
+      client: null,
+      status: 'starting',
+      qr: null,
+      connected: false,
+      phone: null,
+      lastKnownPhone: null,
+      startingTimeoutHandle: null,
+      recoverClient: null,
+      recoveringPromise: null,
+      recoveryBlockedUntil: 0,
+      startingSince: 0,
+      recoveryTimerHandle: null,
+      lastAccessedAt: Date.now(),
+    };
+
+    session.lastAccessedAt = Date.now();
+    sessions.set(sessionId, session);
+
+    const maxInitAttempts = 1;
+    let lastRecoverableError = null;
+    let attemptsUsed = 0;
+    for (let attempt = 1; attempt <= maxInitAttempts; attempt += 1) {
+      try {
+        await withSessionStartupSlot(() => initializeSessionClient(session, sessionId, sessionDir));
+        return session;
+      } catch (error) {
+        const recoverable = isRecoverableRuntimeError(error);
+        if (!recoverable) {
+          throw error;
+        }
+
+        lastRecoverableError = error;
+        attemptsUsed = attempt;
+        if (!shouldRetryRecoverableError(error) || attempt === maxInitAttempts) {
+          break;
+        }
+
+        console.warn(`Retrying recoverable startup error for session ${sessionId} (${attempt + 1}/${maxInitAttempts})`);
+        await sleep(1000);
+      }
+    }
+
+    if (lastRecoverableError) {
+      console.warn(`Session ${sessionId} init stayed recoverable after ${attemptsUsed || 1} startup attempt(s); returning disconnected state`, lastRecoverableError?.message || lastRecoverableError);
+      markSessionDisconnected(session, null, { preservePhone: false });
+      session.recoveryBlockedUntil = Date.now() + SESSION_RECOVERY_COOLDOWN_MS;
+      return session;
+    }
+
+    return session;
+  })().finally(() => {
+    sessionInitPromises.delete(sessionId);
+  });
+
+  sessionInitPromises.set(sessionId, initPromise);
+  return initPromise;
+}
+
+process.on('uncaughtException', (error) => {
+  if (isRecoverableRuntimeError(error)) {
+    console.warn('Recovered uncaught WhatsApp runtime error:', error?.message || error);
+    return;
+  }
+
+  console.error('Uncaught exception', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  if (isRecoverableRuntimeError(reason)) {
+    console.warn('Recovered unhandled WhatsApp runtime rejection:', reason?.message || reason);
+    return;
+  }
+
+  console.error('Unhandled rejection', reason);
+});
+
+app.use(cors());
+app.use(express.json());
+
+function getChannelApiToken(req) {
+  const authorization = String(req.headers.authorization || '');
+  return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+}
+
+function authorizeSessionRequest(req, res, session) {
+  const token = getChannelApiToken(req);
+  if (!token) {
+    return true;
+  }
+
+  if (session.apiToken && session.apiToken !== token) {
+    res.status(401).json({ error: 'Invalid channel API token' });
+    return false;
+  }
+
+  session.apiToken = token;
+  return true;
+}
+
+app.post('/api/sessions/:id/start', async (req, res) => {
+  const sessionId = req.params.id;
+  try {
+    const session = await getOrCreateSession(sessionId);
+    if (!authorizeSessionRequest(req, res, session)) return;
+
+    // Rapid repeated /start calls (e.g. frontend auto-reconnect polling) must not
+    // each force a brand-new browser launch, otherwise this bypass defeats the
+    // whole backoff system. Only allow the cooldown bypass once per interval, and
+    // never once the circuit breaker has tripped — a chronically failing session
+    // should fall back to the same slow, capped cooldown as background recovery
+    // instead of relaunching a browser every interval forever.
+    const sinceLastExplicitStart = Date.now() - Number(session.lastExplicitStartAttemptAt || 0);
+    const canForceBypass = !session.recoveryPaused && sinceLastExplicitStart >= EXPLICIT_START_MIN_INTERVAL_MS;
+
+    if (canForceBypass && isSessionStartupStalled(session) && typeof session.recoverClient === 'function') {
+      console.warn('Session startup appears stalled; triggering recovery', sessionId);
+      session.lastExplicitStartAttemptAt = Date.now();
+      session.recoveryBlockedUntil = 0;
+      try {
+        await recoverClientWithTimeout(session, 'explicit_start_stalled_starting');
+      } catch (error) {
+        if (!isRecoverableRuntimeError(error) && error?.code !== 'SESSION_RECOVERY_TIMEOUT') {
+          throw error;
+        }
+      }
+    }
+
+    if (
+      canForceBypass
+      && (session.status === 'disconnected' || session.status === 'auth_failure')
+      && typeof session.recoverClient === 'function'
+    ) {
+      // Manual start should bypass temporary cooldown and attempt recovery immediately.
+      session.lastExplicitStartAttemptAt = Date.now();
+      session.recoveryBlockedUntil = 0;
+      try {
+        await recoverClientWithTimeout(session, 'explicit_start');
+      } catch (error) {
+        if (!isRecoverableRuntimeError(error) && error?.code !== 'SESSION_RECOVERY_TIMEOUT') {
+          throw error;
+        }
+      }
+    }
+
+    reconcileSessionConnectedState(session);
+    enforceStartingTimeoutFallback(session);
+    await maybeRecoverSession(session);
+    reconcileSessionConnectedState(session);
+    enforceStartingTimeoutFallback(session);
+    return res.json({ status: session.status });
+  } catch (error) {
+    if (isRecoverableRuntimeError(error)) {
+      console.warn('Recoverable start-session failure', sessionId, error?.message || error);
+      const existing = sessions.get(sessionId);
+      if (existing) {
+        markSessionDisconnected(existing, null, { preservePhone: false });
+        existing.recoveryBlockedUntil = Date.now() + SESSION_RECOVERY_COOLDOWN_MS;
+      }
+      return res.json({ status: 'disconnected' });
+    }
+
+    console.error('Failed to start session', sessionId, error);
+    return res.status(500).json({ status: 'error', message: 'Failed to start session' });
+  }
+});
+
+app.post('/api/sessions/:id/reset', async (req, res) => {
+  const sessionId = req.params.id;
+
+  try {
+    const existing = sessions.get(sessionId);
+    if (existing) {
+      clearSessionRecoveryTimer(existing);
+      if (existing.startingTimeoutHandle) {
+        clearTimeout(existing.startingTimeoutHandle);
+        existing.startingTimeoutHandle = null;
+      }
+
+      if (existing.client) {
+        await destroyClientSafely(existing.client, 'reset');
+      }
+    }
+
+    sessions.delete(sessionId);
+    sessionInitPromises.delete(sessionId);
+
+    const sessionDir = await resolveSessionDir(sessionId);
+    await fs.rm(sessionDir, { recursive: true, force: true });
+
+    return res.json({ reset: true, sessionId });
+  } catch (error) {
+    console.error('Failed to reset session', sessionId, error);
+    return res.status(500).json({ reset: false, message: 'Failed to reset session' });
+  }
+});
+
+app.get('/api/sessions/:id/qr', async (req, res) => {
+  const sessionId = req.params.id;
+  let session;
+  try {
+    session = await getOrCreateSession(sessionId);
+  } catch (error) {
+    if (isRecoverableRuntimeError(error)) {
+      console.warn('Recoverable QR-session startup failure', sessionId, error?.message || error);
+      return res.json({ status: 'disconnected' });
+    }
+
+    console.error('Failed to load session for QR', sessionId, error);
+    return res.status(500).json({ status: 'error', message: 'Failed to initialize session' });
+  }
+
+  if (!authorizeSessionRequest(req, res, session)) return;
+
+  reconcileSessionConnectedState(session);
+  enforceStartingTimeoutFallback(session);
+  await maybeRecoverSession(session);
+  reconcileSessionConnectedState(session);
+  enforceStartingTimeoutFallback(session);
+
+  if (session.status === 'starting') {
+    return res.json({ status: 'starting' });
+  }
+
+  if (session.status === 'qr' && session.qr) {
+    try {
+      const dataUrl = await qrcode.toDataURL(session.qr, { width: 400, margin: 2 });
+      return res.json({ status: 'qr', dataUrl });
+    } catch (error) {
+      console.error('QR image generation failed', error);
+      return res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+    }
+  }
+
+  if (session.status === 'connected') {
+    return res.json({ status: 'connected', phone: session.phone ?? null });
+  }
+
+  if (session.status === 'auth_failure') {
+    return res.json({ status: 'auth_failure' });
+  }
+
+  if (session.status === 'disconnected') {
+    return res.json({ status: 'disconnected' });
+  }
+
+  return res.json({ status: 'waiting' });
+});
+
+const sessionRouter = express.Router({ mergeParams: true });
+sessionRouter.use(async (req, res, next) => {
+  try {
+    const sessionId = req.params.id;
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing session id' });
+    }
+
+    const session = await getOrCreateSession(sessionId);
+
+    if (!authorizeSessionRequest(req, res, session)) return;
+
+    reconcileSessionConnectedState(session);
+    enforceStartingTimeoutFallback(session);
+
+    if (
+      session.status === 'disconnected'
+      && typeof session.recoverClient === 'function'
+      && (!session.recoveryBlockedUntil || session.recoveryBlockedUntil <= Date.now())
+    ) {
+      triggerSessionRecovery(session, 'session_router_middleware');
+      reconcileSessionConnectedState(session);
+      enforceStartingTimeoutFallback(session);
+    }
+
+    if (
+      isSessionStartupStalled(session)
+      && typeof session.recoverClient === 'function'
+      && (!session.recoveryBlockedUntil || session.recoveryBlockedUntil <= Date.now())
+    ) {
+      triggerSessionRecovery(session, 'session_router_stalled_starting');
+    }
+
+    enforceStartingTimeoutFallback(session);
+    req.sessionClient = session;
+    next();
+  } catch (error) {
+    console.error('Session initialization error', error);
+    res.status(500).json({ error: 'Failed to initialize session' });
+  }
+});
+
+sessionRouter.use(chatsRouter);
+sessionRouter.use(groupsRouter);
+sessionRouter.use(messagesRouter);
+sessionRouter.use(contactsRouter);
+sessionRouter.use(newslettersRouter);
+sessionRouter.use(statusesRouter);
+sessionRouter.use(webhooksRouter);
+sessionRouter.use(sessionInfoRouter);
+
+app.use('/api/auth', authRouter);
+app.use('/api/sessions/:id', sessionRouter);
+
+const frontendDist = path.join(__dirname, '..', 'dist');
+app.use(express.static(frontendDist));
+app.use((req, res, next) => {
+  if (req.method === 'GET' && req.accepts('html')) {
+    return res.sendFile(path.join(frontendDist, 'index.html'));
+  }
+  return next();
+});
+
+const httpServer = http.createServer(app);
+
+httpServer.on('error', (error) => {
+  console.error('HTTP server error', error);
+});
+
+httpServer.on('close', () => {
+  console.warn('HTTP server closed');
+});
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`WhatsApp backend server listening on http://localhost:${PORT}`);
+});
