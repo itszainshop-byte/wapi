@@ -97,23 +97,19 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:8080',
   'https://zain01-534219343809.europe-west1.run.app',
-  /\.run\.app$/, // Allow all Cloud Run URLs
-  /\.web\.app$/ // Allow Firebase hosting
+  /\.run\.app$/,
+  /\.web\.app$/
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
-    // Check if origin is allowed
     const isAllowed = allowedOrigins.some(allowed => {
       if (allowed instanceof RegExp) {
         return allowed.test(origin);
       }
       return allowed === origin;
     });
-    
     if (isAllowed) {
       callback(null, true);
     } else {
@@ -127,8 +123,14 @@ app.use(cors({
   exposedHeaders: ['Content-Length', 'X-Request-Id']
 }));
 
-// Handle preflight requests
-app.options('*', cors());
+// Handle preflight requests for all routes - FIXED for newer Express versions
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.status(204).send();
+});
 // ============================================================
 
 app.use(express.json());
