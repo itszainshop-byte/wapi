@@ -81,6 +81,15 @@ const sessionInitPromises = new Map();
 const sessionStartupQueue = [];
 let activeSessionStartups = 0;
 
+// Diagnostic logging for container environment
+console.log('=== WhatsApp Server Startup ===');
+console.log('Node version:', process.version);
+console.log('Running as root:', process.getuid ? process.getuid() === 0 : 'unknown');
+console.log('Platform:', process.platform);
+console.log('PORT:', PORT);
+console.log('SESSION_ROOT:', SESSION_ROOT);
+console.log('================================');
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -734,7 +743,51 @@ function createClient(sessionDir) {
     webVersionCache: { type: 'none' },
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+        '--disable-ipc-flooding-protection',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--disable-breakpad',
+        '--disable-client-side-phishing-detection',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-crash-reporter',
+        '--disable-domain-reliability',
+        '--disable-print-preview',
+        '--disable-features=AudioServiceOutOfProcess',
+        '--disable-features=NetworkService',
+        '--disable-features=OutOfBlinkCors',
+        '--disable-javascript',
+        '--hide-scrollbars',
+        '--mute-audio',
+        '--no-default-browser-check',
+        '--no-first-run',
+        '--no-pings',
+        '--no-zygote',
+        '--single-process',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-databases',
+        '--disable-dev-shm-usage',
+        '--disable-file-system',
+        '--disable-translate',
+        '--disable-web-security',
+        '--enable-automation',
+        '--force-device-scale-factor=1',
+        '--remote-debugging-port=0',
+      ],
     },
   });
 }
@@ -1297,6 +1350,6 @@ httpServer.on('close', () => {
   console.warn('HTTP server closed');
 });
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`WhatsApp backend server listening on http://localhost:${PORT}`);
 });
