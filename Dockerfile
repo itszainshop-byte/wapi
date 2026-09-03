@@ -1,12 +1,14 @@
 FROM node:22-bookworm-slim
 
-ENV PUPPETEER_SKIP_DOWNLOAD=false \
-  USERS_FILE=/tmp/whapi-users.json
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    USERS_FILE=/tmp/whapi-users.json
 
-# Libraries required by the Chromium binary used by whatsapp-web.js.
+# Install system dependencies AND Chromium browser
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
+    chromium \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -53,6 +55,7 @@ RUN mkdir -p /app/sessions
 
 ENV NODE_ENV=production \
   PORT=8080
+
 EXPOSE 8080
 
 CMD ["node", "backend/server.js"]
