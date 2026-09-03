@@ -123,13 +123,22 @@ app.use(cors({
   exposedHeaders: ['Content-Length', 'X-Request-Id']
 }));
 
-// Handle preflight requests for all routes - FIXED for newer Express versions
-app.options('*', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.status(204).send();
+// ============================================================
+// IMPORTANT: Do NOT use app.options('*', cors()) - it causes errors
+// with newer versions of Express. Instead, handle OPTIONS requests
+// with a simple middleware that sets CORS headers.
+// ============================================================
+// Handle preflight requests - FIXED for newer Express versions
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.status(204).send();
+    return;
+  }
+  next();
 });
 // ============================================================
 
