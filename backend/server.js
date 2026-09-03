@@ -1160,27 +1160,6 @@ function getChannelApiToken(req) {
   return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
 }
 
-async function proxyWhapiLoginRequest(req, res, endpoint) {
-  const token = getChannelApiToken(req);
-  if (!token) {
-    return res.status(401).json({ error: 'Whapi channel token is required' });
-  }
-
-  try {
-    const response = await fetch(`https://gate.whapi.cloud/users/login${endpoint}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    const body = Buffer.from(await response.arrayBuffer());
-    res.status(response.status).type(contentType).send(body);
-  } catch (error) {
-    console.error(`Whapi login proxy failed (${endpoint})`, error?.message || error);
-    res.status(502).json({ error: 'Unable to reach Whapi.Cloud' });
-  }
-}
-
 function authorizeSessionRequest(req, res, session) {
   const token = getChannelApiToken(req);
   if (!token) {
@@ -1195,10 +1174,6 @@ function authorizeSessionRequest(req, res, session) {
   session.apiToken = token;
   return true;
 }
-
-app.get('/api/sessions/:id/whapi/users/login', (req, res) => proxyWhapiLoginRequest(req, res, ''));
-app.get('/api/sessions/:id/whapi/users/login/image', (req, res) => proxyWhapiLoginRequest(req, res, '/image'));
-app.get('/api/sessions/:id/whapi/users/login/rowdata', (req, res) => proxyWhapiLoginRequest(req, res, '/rowdata'));
 
 app.post('/api/sessions/:id/start', async (req, res) => {
   const sessionId = req.params.id;
@@ -1297,7 +1272,7 @@ app.post('/api/sessions/:id/reset', async (req, res) => {
   }
 });
 
-app.get('/api/sessions/:id/qr', async (req, res) => {
+async function loadSessionQr(req, res) {
   const sessionId = req.params.id;
   let session;
   try {
@@ -1305,14 +1280,15 @@ app.get('/api/sessions/:id/qr', async (req, res) => {
   } catch (error) {
     if (isRecoverableRuntimeError(error)) {
       console.warn('Recoverable QR-session startup failure', sessionId, error?.message || error);
-      return res.json({ status: 'disconnected' });
+      return { status: 'disconnected' };
     }
 
     console.error('Failed to load session for QR', sessionId, error);
-    return res.status(500).json({ status: 'error', message: 'Failed to initialize session' });
+    res.status(500).json({ status: 'error', message: 'Failed to initialize session' });
+    return null;
   }
 
-  if (!authorizeSessionRequest(req, res, session)) return;
+  if (!authorizeSessionRequest(req, res, session)) return null;
 
   reconcileSessionConnectedState(session);
   enforceStartingTimeoutFallback(session);
@@ -1321,32 +1297,90 @@ app.get('/api/sessions/:id/qr', async (req, res) => {
   enforceStartingTimeoutFallback(session);
 
   if (session.status === 'starting') {
-    return res.json({ status: 'starting' });
+    return { status: 'starting' };
   }
 
   if (session.status === 'qr' && session.qr) {
-    try {
-      const dataUrl = await qrcode.toDataURL(session.qr, { width: 400, margin: 2 });
-      return res.json({ status: 'qr', dataUrl });
-    } catch (error) {
-      console.error('QR image generation failed', error);
-      return res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
-    }
+    return { status: 'qr', rowdata: session.qr };
   }
 
   if (session.status === 'connected') {
-    return res.json({ status: 'connected', phone: session.phone ?? null });
+    return { status: 'connected', phone: session.phone ?? null };
   }
 
   if (session.status === 'auth_failure') {
-    return res.json({ status: 'auth_failure' });
+    return { status: 'auth_failure' };
   }
 
   if (session.status === 'disconnected') {
-    return res.json({ status: 'disconnected' });
+    return { status: 'disconnected' };
   }
 
-  return res.json({ status: 'waiting' });
+  return { status: 'waiting' };
+}
+
+app.get('/api/sessions/:id/qr', async (req, res) => {
+  const result = await loadSessionQr(req, res);
+  if (!result) return;
+  if (result?.status !== 'qr') {
+    return res.json(result);
+  }
+
+  try {
+    const dataUrl = await qrcode.toDataURL(result.rowdata, { width: 400, margin: 2 });
+    return res.json({ status: 'qr', dataUrl });
+  } catch (error) {
+    console.error('QR image generation failed', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
+});
+
+// Whapi-compatible login endpoints for API clients. The session id scopes the
+// channel because this self-hosted API does not have Whapi's token-to-channel registry.
+app.get('/api/sessions/:id/users/login', async (req, res) => {
+  const result = await loadSessionQr(req, res);
+  if (!result) return;
+  if (result?.status !== 'qr') {
+    return res.json(result);
+  }
+
+  try {
+    const dataUrl = await qrcode.toDataURL(result.rowdata, { width: 400, margin: 2 });
+    return res.json({
+      status: 'qr',
+      base64: dataUrl.slice(dataUrl.indexOf(',') + 1),
+      dataUrl,
+    });
+  } catch (error) {
+    console.error('QR base64 generation failed', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
+});
+
+app.get('/api/sessions/:id/users/login/image', async (req, res) => {
+  const result = await loadSessionQr(req, res);
+  if (!result) return;
+  if (result?.status !== 'qr') {
+    return res.json(result);
+  }
+
+  try {
+    const image = await qrcode.toBuffer(result.rowdata, { type: 'png', width: 400, margin: 2 });
+    res.type('png').send(image);
+  } catch (error) {
+    console.error('QR image generation failed', error);
+    res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
+});
+
+app.get('/api/sessions/:id/users/login/rowdata', async (req, res) => {
+  const result = await loadSessionQr(req, res);
+  if (!result) return;
+  if (result?.status !== 'qr') {
+    return res.json(result);
+  }
+
+  return res.json({ status: 'qr', rowdata: result.rowdata });
 });
 
 const sessionRouter = express.Router({ mergeParams: true });
