@@ -1160,6 +1160,27 @@ function getChannelApiToken(req) {
   return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
 }
 
+async function proxyWhapiLoginRequest(req, res, endpoint) {
+  const token = getChannelApiToken(req);
+  if (!token) {
+    return res.status(401).json({ error: 'Whapi channel token is required' });
+  }
+
+  try {
+    const response = await fetch(`https://gate.whapi.cloud/users/login${endpoint}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const body = Buffer.from(await response.arrayBuffer());
+    res.status(response.status).type(contentType).send(body);
+  } catch (error) {
+    console.error(`Whapi login proxy failed (${endpoint})`, error?.message || error);
+    res.status(502).json({ error: 'Unable to reach Whapi.Cloud' });
+  }
+}
+
 function authorizeSessionRequest(req, res, session) {
   const token = getChannelApiToken(req);
   if (!token) {
@@ -1174,6 +1195,10 @@ function authorizeSessionRequest(req, res, session) {
   session.apiToken = token;
   return true;
 }
+
+app.get('/api/sessions/:id/whapi/users/login', (req, res) => proxyWhapiLoginRequest(req, res, ''));
+app.get('/api/sessions/:id/whapi/users/login/image', (req, res) => proxyWhapiLoginRequest(req, res, '/image'));
+app.get('/api/sessions/:id/whapi/users/login/rowdata', (req, res) => proxyWhapiLoginRequest(req, res, '/rowdata'));
 
 app.post('/api/sessions/:id/start', async (req, res) => {
   const sessionId = req.params.id;
