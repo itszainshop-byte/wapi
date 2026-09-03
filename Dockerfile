@@ -1,7 +1,6 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
-ENV NODE_ENV=production \
-  PUPPETEER_SKIP_DOWNLOAD=false \
+ENV PUPPETEER_SKIP_DOWNLOAD=false \
   USERS_FILE=/tmp/whapi-users.json
 
 # Libraries required by the Chromium binary used by whatsapp-web.js.
@@ -39,17 +38,18 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package*.json ./
 RUN npm install
 
 COPY . .
 ARG VITE_BACKEND_URL
 ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
-RUN npm run build \
-  && npm prune --omit=dev \
-  && mkdir -p /app/sessions
+RUN npm run build
+RUN npm prune --omit=dev
+RUN mkdir -p /app/sessions
 
-ENV PORT=8080
+ENV NODE_ENV=production \
+  PORT=8080
 EXPOSE 8080
 
 CMD ["node", "backend/server.js"]
