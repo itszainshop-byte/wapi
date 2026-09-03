@@ -1,7 +1,8 @@
 FROM node:20-bookworm-slim
 
 ENV NODE_ENV=production \
-    PUPPETEER_SKIP_DOWNLOAD=false
+  PUPPETEER_SKIP_DOWNLOAD=false \
+  USERS_FILE=/tmp/whapi-users.json
 
 # Libraries required by the Chromium binary used by whatsapp-web.js.
 RUN apt-get update \
