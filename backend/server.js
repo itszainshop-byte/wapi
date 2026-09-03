@@ -89,6 +89,50 @@ app.get('/healthz', (_req, res) => {
 });
 // ============================================================
 
+// ============================================================
+// CORS CONFIGURATION - Allow frontend access
+// ============================================================
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:8080',
+  'https://zain01-534219343809.europe-west1.run.app',
+  /\.run\.app$/, // Allow all Cloud Run URLs
+  /\.web\.app$/ // Allow Firebase hosting
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return allowed === origin;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id']
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+// ============================================================
+
+app.use(express.json());
+
 const sessions = new Map();
 const sessionInitPromises = new Map();
 const sessionStartupQueue = [];
@@ -1113,9 +1157,6 @@ process.on('unhandledRejection', (reason) => {
 
   console.error('Unhandled rejection', reason);
 });
-
-app.use(cors());
-app.use(express.json());
 
 function getChannelApiToken(req) {
   const authorization = String(req.headers.authorization || '');
