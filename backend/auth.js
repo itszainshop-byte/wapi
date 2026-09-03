@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USERS_FILE = path.join(__dirname, 'users.json');
+const USERS_FILE = process.env.USERS_FILE || path.join(__dirname, 'users.json');
 
 async function ensureUsersFile() {
   try {
@@ -29,7 +29,7 @@ async function writeUsers(users) {
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${derived}`;
+  return ${salt}:${derived};
 }
 
 function verifyPassword(password, storedHash) {
