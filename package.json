@@ -1,0 +1,46 @@
+{
+  "name": "vite-react-typescript-starter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "backend": "node backend/run-backend.cjs",
+    "backend:raw": "node backend/server.js",
+    "backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$isBackendCmd = { param([string]$cmd) if (-not $cmd) { return $false }; return ($cmd -like '*backend/server.js*') -or ($cmd -like '*backend\\server.js*') }; $targets = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'node.exe' -and (& $isBackendCmd ([string]$_.CommandLine)) }; if ($targets) { foreach ($p in $targets) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; Write-Host ('Stopped backend node process PID ' + $p.ProcessId + '.') } } else { Write-Host 'No backend node process matched command line.' }; while ($true) { $conn = Get-NetTCPConnection -State Listen -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $conn) { Write-Host 'Port 3000 is free.'; exit 0 }; $proc = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $conn.OwningProcess) | Select-Object -First 1; if ($proc -and $proc.Name -eq 'node.exe' -and (& $isBackendCmd ([string]$proc.CommandLine))) { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue; Write-Host ('Stopped listener backend PID ' + $proc.ProcessId + '.'); continue }; if ($proc) { Write-Host ('Port 3000 is used by non-backend process: ' + $proc.Name + ' (PID ' + $proc.ProcessId + ').'); exit 1 }; Write-Host 'Found listener but could not resolve owning process.'; exit 1 }\"",
+    "backend:safe": "npm run backend:stop && npm run backend",
+    "backend:restart": "npm run backend:safe",
+    "dev:full": "concurrently \"npm run backend\" \"npm run dev\"",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  },
+  "dependencies": {
+    "concurrently": "^10.0.4",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "html5-qrcode": "^2.3.8",
+    "lucide-react": "^0.344.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "whatsapp-web.js": "^1.34.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.1",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.18",
+    "eslint": "^9.9.1",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.11",
+    "globals": "^15.9.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.3.0",
+    "vite": "^5.4.2"
+  }
+}

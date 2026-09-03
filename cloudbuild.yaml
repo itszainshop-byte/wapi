@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - VITE_BACKEND_URL=${_VITE_BACKEND_URL}
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}
+substitutions:
+  _VITE_BACKEND_URL: https://zain01-534219343809.europe-west1.run.app
+options:
+  logging: CLOUD_LOGGING_ONLY
