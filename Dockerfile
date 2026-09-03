@@ -39,13 +39,15 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
-
+# Copy the full source BEFORE npm install, since a package.json
+# lifecycle script (prepare/postinstall) triggers "vite build"
+# automatically on install — it needs src/ and index.html present.
 COPY . .
+
 ARG VITE_BACKEND_URL
 ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
-RUN npm run build
+
+RUN npm install
 RUN npm prune --omit=dev
 RUN mkdir -p /app/sessions
 
