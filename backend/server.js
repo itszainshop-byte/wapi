@@ -90,8 +90,9 @@ app.get('/healthz', (_req, res) => {
 // ============================================================
 
 // ============================================================
-// CORS CONFIGURATION - Allow frontend access
+// CORS CONFIGURATION - SIMPLIFIED FIX
 // ============================================================
+// Allow all origins for development - use specific origins in production
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
@@ -101,43 +102,35 @@ const allowedOrigins = [
   /\.web\.app$/
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (allowed instanceof RegExp) {
-        return allowed.test(origin);
-      }
-      return allowed === origin;
-    });
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.warn('CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
-  exposedHeaders: ['Content-Length', 'X-Request-Id']
-}));
-
-// ============================================================
-// IMPORTANT: Do NOT use app.options('*', cors()) - it causes errors
-// with newer versions of Express. Instead, handle OPTIONS requests
-// with a simple middleware that sets CORS headers.
-// ============================================================
-// Handle preflight requests - FIXED for newer Express versions
+// CORS middleware - simplified
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin is allowed
+  const isAllowed = !origin || allowedOrigins.some(allowed => {
+    if (allowed instanceof RegExp) {
+      return allowed.test(origin);
+    }
+    return allowed === origin;
+  });
+
+  if (isAllowed) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Handle preflight requests immediately
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.status(204).send();
     return;
   }
+  
   next();
 });
 // ============================================================
