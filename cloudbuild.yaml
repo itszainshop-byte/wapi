@@ -7,9 +7,44 @@ steps:
       - -t
       - ${_IMAGE}
       - .
+    timeout: 600s
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_IMAGE}
+    timeout: 600s
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_IMAGE}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --memory=2Gi
+      - --cpu=2
+      - --concurrency=1
+      - --timeout=3600
+      - --startup-cpu-boost
+      - --min-instances=0
+      - --max-instances=1
+      - --set-env-vars=NODE_ENV=production,PORT=8080,MAX_CONCURRENT_SESSION_STARTUPS=1,SESSION_STARTING_TIMEOUT_MS=180000,SESSION_CLIENT_INITIALIZE_TIMEOUT_MS=120000
+    timeout: 600s
+
 images:
   - ${_IMAGE}
+
 substitutions:
   _VITE_BACKEND_URL: https://zain01-534219343809.europe-west1.run.app
+  _SERVICE_NAME: zain01
+  _REGION: europe-west1
+  _IMAGE: europe-west1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/wapi/zain01:${SHORT_SHA}
+
 options:
   logging: CLOUD_LOGGING_ONLY
+  substitution_option: ALLOW_LOOSE
