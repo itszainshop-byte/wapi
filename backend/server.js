@@ -1335,6 +1335,23 @@ app.get(['/api/sessions/:id/qr', '/api/channels/:id/qr', '/sessions/:id/qr', '/c
   }
 });
 
+// Allow API clients to use the channel URL itself as the QR login endpoint.
+app.get(['/api/sessions/:id', '/api/channels/:id', '/sessions/:id', '/channels/:id'], async (req, res) => {
+  const result = await loadSessionQr(req, res);
+  if (!result) return;
+  if (result?.status !== 'qr') {
+    return res.json(result);
+  }
+
+  try {
+    const dataUrl = await qrcode.toDataURL(result.rowdata, { width: 400, margin: 2 });
+    return res.json({ status: 'qr', dataUrl });
+  } catch (error) {
+    console.error('Channel QR image generation failed', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
+});
+
 // Whapi-compatible login endpoints for API clients. The session id scopes the
 // channel because this self-hosted API does not have Whapi's token-to-channel registry.
 app.get([
