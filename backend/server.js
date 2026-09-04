@@ -1273,7 +1273,7 @@ app.post('/api/sessions/:id/reset', async (req, res) => {
   }
 });
 
-async function loadSessionQr(req, res) {
+async function loadSessionQr(req, res, { forceStart = false } = {}) {
   const sessionId = req.params.id;
   let session;
   try {
@@ -1290,6 +1290,23 @@ async function loadSessionQr(req, res) {
   }
 
   if (!authorizeSessionRequest(req, res, session)) return null;
+
+  if (
+    forceStart
+    && (session.status === 'disconnected' || session.status === 'auth_failure')
+    && typeof session.recoverClient === 'function'
+  ) {
+    session.recoveryBlockedUntil = 0;
+    session.recoveryPaused = false;
+    session.lastExplicitStartAttemptAt = Date.now();
+    try {
+      await recoverClientWithTimeout(session, 'bare_channel_qr_request');
+    } catch (error) {
+      if (!isRecoverableRuntimeError(error) && error?.code !== 'SESSION_RECOVERY_TIMEOUT') {
+        console.error('Bare channel QR startup failed', session.sessionId, error);
+      }
+    }
+  }
 
   reconcileSessionConnectedState(session);
   enforceStartingTimeoutFallback(session);
@@ -1338,7 +1355,7 @@ app.get(['/api/sessions/:id/qr', '/api/channels/:id/qr', '/sessions/:id/qr', '/c
 
 // Allow API clients to use the channel URL itself as the QR login endpoint.
 app.get(['/api/sessions/:id', '/api/channels/:id', '/sessions/:id', '/channels/:id'], async (req, res) => {
-  const result = await loadSessionQr(req, res);
+  const result = await loadSessionQr(req, res, { forceStart: true });
   if (!result) return;
   if (result?.status !== 'qr') {
     return res.json(result);
