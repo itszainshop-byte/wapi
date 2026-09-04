@@ -1350,7 +1350,7 @@ async function loadSessionQr(req, res, { forceStart = false } = {}) {
 }
 
 app.get(['/api/sessions/:id/qr', '/api/channels/:id/qr', '/sessions/:id/qr', '/channels/:id/qr'], async (req, res) => {
-  const result = await loadSessionQr(req, res);
+  const result = await loadSessionQr(req, res, { forceStart: true });
   if (!result) return;
   if (result?.status !== 'qr') {
     return res.json(result);
