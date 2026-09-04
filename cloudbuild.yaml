@@ -24,6 +24,8 @@ steps:
       - --image=${_IMAGE}
       - --region=${_REGION}
       - --platform=managed
+      - --revision-suffix=${SHORT_SHA}
+      - --traffic=latest=100
       - --allow-unauthenticated
       - --port=8080
       - --memory=2Gi
