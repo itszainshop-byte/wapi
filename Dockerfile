@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim
 
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
-  PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    USERS_FILE=/tmp/whapi-users.json
 
 # Install system dependencies AND Chromium browser
 RUN apt-get update \
@@ -50,10 +51,11 @@ ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
 
 RUN npm install
 RUN npm prune --omit=dev
-RUN mkdir -p /app/sessions
+RUN mkdir -p /tmp/whapi-sessions
 
 ENV NODE_ENV=production \
-  PORT=8080
+  PORT=8080 \
+  SESSION_ROOT=/tmp/whapi-sessions
 
 EXPOSE 8080
 
