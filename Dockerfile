@@ -1,8 +1,7 @@
 FROM node:22-bookworm-slim
 
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    USERS_FILE=/tmp/whapi-users.json
+  PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install system dependencies AND Chromium browser
 RUN apt-get update \
