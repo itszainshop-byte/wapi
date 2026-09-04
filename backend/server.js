@@ -1319,7 +1319,7 @@ async function loadSessionQr(req, res) {
   return { status: 'waiting' };
 }
 
-app.get('/api/sessions/:id/qr', async (req, res) => {
+app.get(['/api/sessions/:id/qr', '/api/channels/:id/qr', '/sessions/:id/qr', '/channels/:id/qr'], async (req, res) => {
   const result = await loadSessionQr(req, res);
   if (!result) return;
   if (result?.status !== 'qr') {
@@ -1337,7 +1337,12 @@ app.get('/api/sessions/:id/qr', async (req, res) => {
 
 // Whapi-compatible login endpoints for API clients. The session id scopes the
 // channel because this self-hosted API does not have Whapi's token-to-channel registry.
-app.get('/api/sessions/:id/users/login', async (req, res) => {
+app.get([
+  '/api/sessions/:id/users/login',
+  '/api/channels/:id/users/login',
+  '/sessions/:id/users/login',
+  '/channels/:id/users/login',
+], async (req, res) => {
   const result = await loadSessionQr(req, res);
   if (!result) return;
   if (result?.status !== 'qr') {
@@ -1357,7 +1362,12 @@ app.get('/api/sessions/:id/users/login', async (req, res) => {
   }
 });
 
-app.get('/api/sessions/:id/users/login/image', async (req, res) => {
+app.get([
+  '/api/sessions/:id/users/login/image',
+  '/api/channels/:id/users/login/image',
+  '/sessions/:id/users/login/image',
+  '/channels/:id/users/login/image',
+], async (req, res) => {
   const result = await loadSessionQr(req, res);
   if (!result) return;
   if (result?.status !== 'qr') {
@@ -1373,7 +1383,12 @@ app.get('/api/sessions/:id/users/login/image', async (req, res) => {
   }
 });
 
-app.get('/api/sessions/:id/users/login/rowdata', async (req, res) => {
+app.get([
+  '/api/sessions/:id/users/login/rowdata',
+  '/api/channels/:id/users/login/rowdata',
+  '/sessions/:id/users/login/rowdata',
+  '/channels/:id/users/login/rowdata',
+], async (req, res) => {
   const result = await loadSessionQr(req, res);
   if (!result) return;
   if (result?.status !== 'qr') {
