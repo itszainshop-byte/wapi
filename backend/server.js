@@ -62,6 +62,9 @@ const EXPLICIT_START_MIN_INTERVAL_MS = process.env.SESSION_EXPLICIT_START_MIN_IN
 const SESSION_IDLE_RECOVERY_SUPPRESS_MS = process.env.SESSION_IDLE_RECOVERY_SUPPRESS_MS
   ? Number(process.env.SESSION_IDLE_RECOVERY_SUPPRESS_MS)
   : 60000;
+const QR_WAIT_TIMEOUT_MS = process.env.SESSION_QR_WAIT_TIMEOUT_MS
+  ? Number(process.env.SESSION_QR_WAIT_TIMEOUT_MS)
+  : 30000;
 const STALE_BROWSER_ARTIFACTS = ['DevToolsActivePort', 'lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
 const BROWSER_LOCK_RELEASE_TIMEOUT_MS = 15000;
 const BROWSER_LOCK_RETRY_MS = 250;
@@ -1314,6 +1317,15 @@ async function loadSessionQr(req, res, { forceStart = false } = {}) {
   reconcileSessionConnectedState(session);
   enforceStartingTimeoutFallback(session);
 
+  // A direct browser request should wait for the asynchronous QR event instead
+  // of exposing the short-lived starting state to the caller.
+  const waitStartedAt = Date.now();
+  while (session.status === 'starting' && Date.now() - waitStartedAt < QR_WAIT_TIMEOUT_MS) {
+    await sleep(500);
+    reconcileSessionConnectedState(session);
+    enforceStartingTimeoutFallback(session);
+  }
+
   if (session.status === 'starting') {
     return { status: 'starting' };
   }
@@ -1362,7 +1374,12 @@ app.get(['/api/sessions/:id', '/api/channels/:id', '/sessions/:id', '/channels/:
   }
 
   try {
-    const dataUrl = await qrcode.toDataURL(result.rowdata, { width: 400, margin: 2 });
+    const image = await qrcode.toBuffer(result.rowdata, { type: 'png', width: 400, margin: 2 });
+    if (req.accepts('html') && !req.accepts('json')) {
+      return res.type('png').send(image);
+    }
+
+    const dataUrl = `data:image/png;base64,${image.toString('base64')}`;
     return res.json({ status: 'qr', dataUrl });
   } catch (error) {
     console.error('Channel QR image generation failed', error);
