@@ -33,7 +33,7 @@ steps:
       - --startup-cpu-boost
       - --min-instances=0
       - --max-instances=1
-      - --set-env-vars=NODE_ENV=production,PORT=8080,MAX_CONCURRENT_SESSION_STARTUPS=1,SESSION_STARTING_TIMEOUT_MS=180000,SESSION_CLIENT_INITIALIZE_TIMEOUT_MS=120000
+      - --set-env-vars=NODE_ENV=production,PORT=8080,SESSION_ROOT=/tmp/whapi-sessions,PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium,MAX_CONCURRENT_SESSION_STARTUPS=1,SESSION_STARTING_TIMEOUT_MS=180000,SESSION_CLIENT_INITIALIZE_TIMEOUT_MS=120000
     timeout: 600s
 
 images:
